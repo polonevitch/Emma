@@ -12,6 +12,9 @@
 
 #include <console.h>
 
+#include "LSL/include/lsl_cpp.h"
+#include "pugixml/pugixml.hpp"
+
 bool checkFileExists(QString filePath)
 {
     return QFileInfo::exists(filePath) && QFileInfo(filePath).isFile();
@@ -162,6 +165,33 @@ bool loadPacketCfg(QString filePath, packetConfig pCfg)
     return true;
 }
 
+bool loadStreamInf(QString filePath, lsl::stream_info* i)
+{
+    if(!i)
+        return false;
+    if(!checkFileExists(filePath))
+        return false;
+
+    QFile f(filePath);
+    if (!f.open(QFile::ReadOnly | QFile::Text))
+        return false;
+
+    QTextStream in(&f);
+    QString xmlFile = in.readAll();
+    i->from_xml(xmlFile.toStdString());
+
+    return true;
+}
+
+bool parseBuf(QByteArray* buf, packetConfig templ)
+{
+    return true;
+}
+
+bool sendSLS()
+{
+    return true;
+}
 
 int main(int argc, char *argv[])
 {
@@ -170,6 +200,11 @@ int main(int argc, char *argv[])
     QString portCfgFile("C:\\Users\\Alexander Polonevich\\Documents\\su\\com.ini");
     QString packetCfgFile("C:\\Users\\Alexander Polonevich\\Documents\\su\\pac.ini");
     QString scriptFile("C:\\Users\\Alexander Polonevich\\Documents\\su\\script.txt");
+    QString streamFile("C:\\Users\\Alexander Polonevich\\Documents\\su\\stream.xml");
+
+    QString sender("Emma");
+    QString content("Content");
+    double rate = lsl::IRREGULAR_RATE;
 
     console stdConsole;
     stdConsole.start();
@@ -211,7 +246,7 @@ int main(int argc, char *argv[])
 
     stdConsole.writeMessage("Initializing...");
     bool err = false;
-    foreach(QString command, initScript)
+    /*foreach(QString command, initScript)
     {
         err = true;
         emma.write(command.toUtf8());
@@ -225,9 +260,9 @@ int main(int argc, char *argv[])
         while (emma.waitForReadyRead(10))
             responseData += emma.readAll();
 
-        qInfo() << responseData;
+        stdConsole.writeMessage(responseData);
         err = false;
-    }
+    }*/
 
     if(!err)
         stdConsole.writeMessage("OK");
@@ -238,17 +273,44 @@ int main(int argc, char *argv[])
         return 2;
     }
 
+    lsl::stream_info streamInfo(sender.toStdString().c_str(), "EEG", 2, rate, lsl::cf_float32);
+
+    stdConsole.writeMessage("Loading stream description...");
+    /*if(loadStreamInf(streamFile, &streamInfo))
+        stdConsole.writeMessage("OK");
+    else
+        stdConsole.writeMessage("FAIL");
+*/
+    lsl::stream_outlet lslOut(streamInfo);
+
+   //qDebug() << "channels" << streamInfo.channel_count();
+
     stdConsole.writeMessage("Starting interchange...");
+    QByteArray buf;
+    int32_t sample[2];
     while(true)
     {
-        stdConsole.writeMessage("+");
-        QThread::sleep(1);
-
         if(!stdConsole.getLatestCommand().isEmpty())
             break;
+
+ /*       buf.append(emma.readAll());
+        if(buf.isEmpty())
+        {
+            QThread::msleep(1);
+            continue;
+        }
+
+        while(parseBuf(&buf, emmaPack))
+              sendSLS();*/
+        sample[0]=(rand()%1500)/500.0-1.5;
+        sample[1]=(rand()%1500)/500.0-1.5;
+        lslOut.push_sample(sample);
+        QThread::msleep(1);
+
     }
 
     emma.close();
+    stdConsole.writeMessage("*** Session Finished ***");
     stdConsole.stopThread();
     return a.exec();
 }
