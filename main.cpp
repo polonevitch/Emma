@@ -9,6 +9,7 @@
 #include <QMap>
 #include <QList>
 #include <QThread>
+#include <QByteArrayMatcher>
 
 #include <console.h>
 
@@ -112,10 +113,15 @@ bool loadPortCfg(QString filePath, QSerialPort* port)
     return result;
 }
 
-typedef unsigned char packetConfig[24];
+typedef unsigned char packetData[65];
+const int channels = 24;
+typedef unsigned char packetConfig[channels];
+//const unsigned char channelsOffset[channels]={1, 2, 5, 8, 11, 14, 17, 20, 23, 26, 29, 32, 35, 38, 41, 44, 47, 50, 53, 56, 59, 61, 63, 65};
+//const unsigned char channelsSize[channels]={1, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 2, 2, 2, 1};
 
 bool loadPacketCfg(QString filePath, packetConfig pCfg)
 {
+
     if(!pCfg)
         return false;
     if(!checkFileExists(filePath))
@@ -183,19 +189,79 @@ bool loadStreamInf(QString filePath, lsl::stream_info* i)
     return true;
 }
 
-bool parseBuf(QByteArray* buf, packetConfig templ)
+
+int getPacketSize(packetConfig pCfg)
 {
-    return true;
+    int res = 2; // |0xA0|[DATA]|0xC0|
+    for (size_t i=0; i<sizeof(packetConfig); i++)
+        res+=pCfg[i];
+    return res;
 }
 
-bool sendSLS()
+int getPacketChannels(packetConfig pCfg)
 {
-    return true;
+    int res = 0;
+    for (size_t i=0; i<sizeof(packetConfig); i++)
+        if(pCfg[i]>0)
+            res++;
+    return res;
 }
+
+bool getPacketData(QByteArray* buffer, int32_t* result, packetConfig curCfg, int expectedSize, QByteArrayMatcher* startSeq, QByteArrayMatcher* endSeq)
+{
+    int packStartIndex = startSeq->indexIn(*buffer);
+    int packEndIndex = endSeq->indexIn(*buffer);
+
+    if(packStartIndex<0 && packEndIndex<0)
+    {
+        buffer->clear();
+        return false;
+    }
+
+    if(packStartIndex>=0 && packEndIndex>packStartIndex)
+    {
+        int stopLen = endSeq->pattern().size();
+        if((packEndIndex-packStartIndex+(stopLen-2))!=expectedSize) // '-2' hardcoded, bc it is x0D0A bytes which is gonna turned off soon
+        {
+            buffer->remove(0, packEndIndex+stopLen);
+            return false;
+        }
+
+        char* chunk = buffer->data()+packStartIndex;
+        int offset = 1;
+        int resIndex= 0;
+
+        for (size_t i=0; i<sizeof(packetConfig); i++)
+        {
+            if(curCfg[i]==0)
+                continue;
+
+            int chanVal = 0;
+            memcpy(&chanVal, chunk+offset, curCfg[i]);
+            offset+=curCfg[i];
+            result[resIndex]=chanVal;
+            resIndex++;
+        }
+
+        buffer->remove(0, packEndIndex+stopLen);
+        return true;
+    }
+
+    buffer->remove(0, qMax(packStartIndex, packEndIndex));
+    return false;
+}
+
 
 int main(int argc, char *argv[])
 {
     QCoreApplication a(argc, argv);
+
+    QFile bin("C:\\Users\\Alexander Polonevich\\Documents\\su\\packet.bin");
+    if (!bin.open(QFile::ReadOnly))
+        return 1;
+
+    //QByteArray binBuf = bin.readAll();
+
 
     QString portCfgFile("C:\\Users\\Alexander Polonevich\\Documents\\su\\com.ini");
     QString packetCfgFile("C:\\Users\\Alexander Polonevich\\Documents\\su\\pac.ini");
@@ -273,7 +339,10 @@ int main(int argc, char *argv[])
         return 2;
     }
 
-    lsl::stream_info streamInfo(sender.toStdString().c_str(), "EEG", 2, rate, lsl::cf_float32);
+    int ps = getPacketSize(emmaPack);
+    int cc =getPacketChannels(emmaPack);
+
+    lsl::stream_info streamInfo(sender.toStdString().c_str(), "EEG", cc, rate, lsl::cf_float32);
 
     stdConsole.writeMessage("Loading stream description...");
     /*if(loadStreamInf(streamFile, &streamInfo))
@@ -283,32 +352,35 @@ int main(int argc, char *argv[])
 */
     lsl::stream_outlet lslOut(streamInfo);
 
-   //qDebug() << "channels" << streamInfo.channel_count();
-
     stdConsole.writeMessage("Starting interchange...");
-    QByteArray buf;
-    int32_t sample[2];
+    QByteArray buf=bin.readAll();
+    int32_t* sample = new int32_t[cc];
+    QByteArrayMatcher startTemplate;
+    startTemplate.setPattern(QByteArrayLiteral("\xA0"));
+    QByteArrayMatcher endTemplate;
+    endTemplate.setPattern(QByteArrayLiteral("\xC0\x0D\x0A"));
+
+
     while(true)
     {
         if(!stdConsole.getLatestCommand().isEmpty())
             break;
 
- /*       buf.append(emma.readAll());
+        /*buf.append(emma.readAll());
         if(buf.isEmpty())
         {
             QThread::msleep(1);
             continue;
-        }
-
-        while(parseBuf(&buf, emmaPack))
-              sendSLS();*/
-        sample[0]=(rand()%1500)/500.0-1.5;
-        sample[1]=(rand()%1500)/500.0-1.5;
-        lslOut.push_sample(sample);
-        QThread::msleep(1);
+        }*/
+int pc = 0;
+        while(buf.length()>=ps)
+            if(getPacketData(&buf, sample, emmaPack, ps, &startTemplate, &endTemplate))
+                pc++;
+        qDebug() << pc;
 
     }
 
+    delete [] sample;
     emma.close();
     stdConsole.writeMessage("*** Session Finished ***");
     stdConsole.stopThread();
