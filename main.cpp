@@ -164,7 +164,7 @@ bool loadPacketCfg(QString filePath, packetConfig pCfg)
         if(packetSettings.value(it->first, 0).toBool())
             pCfg[pos]=it->second;
 
-        it++;
+        ++it;
         pos++;
     }
 
@@ -204,6 +204,23 @@ int getPacketChannels(packetConfig pCfg)
     for (size_t i=0; i<sizeof(packetConfig); i++)
         if(pCfg[i]>0)
             res++;
+    return res;
+}
+
+int getOnChannels(packetConfig pCfg, QPair<int, int> range, int* indexOffset)
+{
+    int res = 0;
+    *indexOffset =0;
+    for (int i=0; i<=range.second; i++)
+    {
+        if(pCfg[i]>0)
+        {
+            if(i<range.first)
+                (*indexOffset)++;
+            else
+                res++;
+        }
+    }
     return res;
 }
 
@@ -251,6 +268,19 @@ bool getPacketData(QByteArray* buffer, int32_t* result, packetConfig curCfg, int
     return false;
 }
 
+bool getLSLframe(int32_t* dataChunk, int32_t* LSLframe, packetConfig packCfg, int indexOffset, QPair<int, int> chRange)
+{
+    int i = 0;
+    for (int c=chRange.first; c<=chRange.second; c++)
+    {
+        if(packCfg[c]>0)
+        {
+            LSLframe[i] = dataChunk[indexOffset+i];
+            i++;
+        }
+    }
+    return true;
+}
 
 int main(int argc, char *argv[])
 {
@@ -355,8 +385,11 @@ int main(int argc, char *argv[])
 
     int ps = getPacketSize(emmaPack);
     int cc =getPacketChannels(emmaPack);
+    const QPair<int, int> valuableChannels = qMakePair(4, 22);
+    int off = 0;
+    int onChan = getOnChannels(emmaPack, valuableChannels, &off);
 
-    lsl::stream_info streamInfo(sender.toStdString().c_str(), "EEG", cc, rate, lsl::cf_float32);
+    lsl::stream_info streamInfo(sender.toStdString().c_str(), "EEG", onChan, rate, lsl::cf_float32);
 
     stdConsole.writeMessage("Loading stream description...");
     /*if(loadStreamInf(streamFile, &streamInfo))
@@ -369,11 +402,14 @@ int main(int argc, char *argv[])
     stdConsole.writeMessage("Starting interchange...");
     QByteArray buf=bin.readAll();
     int32_t* sample = new int32_t[cc];
+
     QByteArrayMatcher startTemplate;
     startTemplate.setPattern(QByteArrayLiteral("\xA0"));
     QByteArrayMatcher endTemplate;
     endTemplate.setPattern(QByteArrayLiteral("\xC0\x0D\x0A"));
 
+    int32_t* measuredData = new int32_t[onChan];
+    memset(measuredData, 0, sizeof(int32_t)*static_cast<size_t>(onChan));
 
     while(true)
     {
@@ -386,15 +422,20 @@ int main(int argc, char *argv[])
             QThread::msleep(1);
             continue;
         }*/
-int pc = 0;
+//int pc = 0;
         while(buf.length()>=ps)
             if(getPacketData(&buf, sample, emmaPack, ps, &startTemplate, &endTemplate))
-                pc++;
-        qDebug() << pc;
+            {
+                getLSLframe(sample, measuredData, emmaPack, off, valuableChannels);
+                lslOut.push_sample(measuredData);
+            }
+             //   pc++;
+        //qDebug() << pc;
 
     }
 
     delete [] sample;
+    delete [] measuredData;
     emma.close();
     stdConsole.writeMessage("*** Session Finished ***");
     stdConsole.stopThread();
