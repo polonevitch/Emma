@@ -255,18 +255,32 @@ bool getPacketData(QByteArray* buffer, int32_t* result, packetConfig curCfg, int
 int main(int argc, char *argv[])
 {
     QCoreApplication a(argc, argv);
+    QCoreApplication::setApplicationName("Emma terminal");
+    QCoreApplication::setApplicationVersion("0.1");
 
+    QCommandLineParser parser;
+    parser.setApplicationDescription("COM -> LSL brocker");
+    parser.addVersionOption();
+    parser.addPositionalArgument("port", "Path to .ini file with com port esttings");
+    parser.addPositionalArgument("packet", "Path to .ini file with packet configuration");
+    parser.addPositionalArgument("script", "Path to .txt file with startup script");
+
+    parser.process(a);
+    const QStringList args = parser.positionalArguments();
+    if(args.count()!=3)
+        return 0;
+
+    ///
     QFile bin("C:\\Users\\Alexander Polonevich\\Documents\\su\\packet.bin");
     if (!bin.open(QFile::ReadOnly))
         return 1;
+    ///
 
-    //QByteArray binBuf = bin.readAll();
-
-
-    QString portCfgFile("C:\\Users\\Alexander Polonevich\\Documents\\su\\com.ini");
-    QString packetCfgFile("C:\\Users\\Alexander Polonevich\\Documents\\su\\pac.ini");
-    QString scriptFile("C:\\Users\\Alexander Polonevich\\Documents\\su\\script.txt");
+    QString portCfgFile(args[0]);
+    QString packetCfgFile(args[1]);
+    QString scriptFile(args[2]);
     QString streamFile("C:\\Users\\Alexander Polonevich\\Documents\\su\\stream.xml");
+
 
     QString sender("Emma");
     QString content("Content");

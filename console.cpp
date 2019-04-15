@@ -2,6 +2,7 @@
 
 console::console()
 {
+    stop = false;
 }
 
 void console::writeMessage(QString msg)
