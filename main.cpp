@@ -238,7 +238,7 @@ bool getPacketData(QByteArray* buffer, int32_t* result, packetConfig curCfg, int
     if(packStartIndex>=0 && packEndIndex>packStartIndex)
     {
         int stopLen = endSeq->pattern().size();
-        if((packEndIndex-packStartIndex+(stopLen-2))!=expectedSize) // '-2' hardcoded, bc it is x0D0A bytes which is gonna turned off soon
+        if((packEndIndex-packStartIndex+(stopLen-2))!=expectedSize) // '-2' hardcoded, bc it is x0Dx0A bytes which is gonna turned off soon
         {
             buffer->remove(0, packEndIndex+stopLen);
             return false;
@@ -267,7 +267,10 @@ bool getPacketData(QByteArray* buffer, int32_t* result, packetConfig curCfg, int
     if(buffer->length()>expectedSize*5)
         buffer->clear();  // buffer size > expectedSize*5 and still no packet start or packet end found. Something strange.
     else
+    //{
         buffer->remove(0, qMax(packStartIndex, packEndIndex));
+      // qDebug() << buffer->length();
+    //}
     return false;
 }
 
@@ -298,16 +301,17 @@ int main(int argc, char *argv[])
     parser.addPositionalArgument("packet", "Path to .ini file with packet configuration");
     parser.addPositionalArgument("script", "Path to .txt file with startup script");
 
+    QCommandLineOption senderOption("sender", "Name of the stream. Describes the device that this stream makes available");
+    senderOption.setDefaultValue("Emma");
+    QCommandLineOption rateOption("rate", "The sampling rate (in Hz) as advertised by the data source");
+    rateOption.setDefaultValue("0");
+    parser.addOption(senderOption);
+    parser.addOption(rateOption);
+
     parser.process(a);
     const QStringList args = parser.positionalArguments();
-    if(args.count()!=3)
+    if(args.count()<3)
         return 0;
-
-    ///
-    QFile bin("C:\\Users\\Alexander Polonevich\\Documents\\su\\packet.bin");
-    if (!bin.open(QFile::ReadOnly))
-        return 1;
-    ///
 
     QString portCfgFile(args[0]);
     QString packetCfgFile(args[1]);
@@ -315,13 +319,12 @@ int main(int argc, char *argv[])
     QString streamFile("C:\\Users\\Alexander Polonevich\\Documents\\su\\stream.xml");
 
 
-    QString sender("Emma");
-    QString content("Content");
-    double rate = lsl::IRREGULAR_RATE;
+    QString sender = parser.value(senderOption);
+    double rate = parser.value(rateOption).toDouble();
 
     console stdConsole;
     stdConsole.start();
-    stdConsole.writeMessage("Emma term v0.1");
+    stdConsole.writeMessage("[  INF  ] Emma term v0.1");
 
     QStringList initScript;
     QSerialPort emma;
@@ -329,35 +332,35 @@ int main(int argc, char *argv[])
     packetConfig emmaPack;
     memset(emmaPack, 0, sizeof(packetConfig));
 
-    stdConsole.writeMessage("Loadin port config...");
+    stdConsole.writeMessage("[  INF  ] Loadin port config...");
     if(loadPortCfg(portCfgFile, &emma))
-        stdConsole.writeMessage("OK");
+        stdConsole.writeMessage("[  INF  ] OK");
     else
-        stdConsole.writeMessage("FAIL");
+        stdConsole.writeMessage("[WARNING] FAIL");
 
-    stdConsole.writeMessage("Loadin packet config...");
+    stdConsole.writeMessage("[  INF  ] Loadin packet config...");
     if(loadPacketCfg(packetCfgFile, emmaPack))
-        stdConsole.writeMessage("OK");
+        stdConsole.writeMessage("[  INF  ] OK");
     else
-        stdConsole.writeMessage("FAIL");
+        stdConsole.writeMessage("[WARNING] FAIL");
 
-    stdConsole.writeMessage("Loadin startup script...");
+    stdConsole.writeMessage("[  INF  ] Loadin startup script...");
     if(loadScript(scriptFile, &initScript))
-        stdConsole.writeMessage("OK");
+        stdConsole.writeMessage("[  INF  ] OK");
     else
-        stdConsole.writeMessage("FAIL");
+        stdConsole.writeMessage("[WARNING] FAIL");
 
-    stdConsole.writeMessage("Opening port...");
+    stdConsole.writeMessage("[  INF  ] Opening port...");
     if (emma.open(QIODevice::ReadWrite))
-        stdConsole.writeMessage("OK");
+        stdConsole.writeMessage("[  INF  ] OK");
     else
     {
-        stdConsole.writeMessage("FAIL");
+        stdConsole.writeMessage("[WARNING] FAIL");
         stdConsole.stopThread();
         return 1;
     }
 
-    stdConsole.writeMessage("Initializing...");
+    stdConsole.writeMessage("[  INF  ] Initializing...");
     bool err = false;
     foreach(QString command, initScript)
     {
@@ -379,10 +382,10 @@ int main(int argc, char *argv[])
     }
 
     if(!err)
-        stdConsole.writeMessage("OK");
+        stdConsole.writeMessage("[  INF  ] OK");
     else
     {
-        stdConsole.writeMessage("FAIL");
+        stdConsole.writeMessage("[WARNING] FAIL");
         stdConsole.stopThread();
         return 2;
     }
@@ -403,8 +406,8 @@ int main(int argc, char *argv[])
 */
     lsl::stream_outlet lslOut(streamInfo);
 
-    stdConsole.writeMessage("Starting interchange...");
-    QByteArray buf;//=bin.readAll();
+    stdConsole.writeMessage("[  INF  ] Starting interchange...");
+    QByteArray buf;
     int32_t* sample = new int32_t[cc];
 
     QByteArrayMatcher startTemplate;
@@ -421,31 +424,21 @@ int main(int argc, char *argv[])
             break;
         if(!emma.waitForReadyRead())
             continue;
+
         buf.append(emma.readAll());
-        //if(buf.isEmpty())
-        //{
-        //    QThread::msleep(1);
-        //    continue;
-        //}
-//int pc = 0;
-        while(buf.length()>=ps)
+        while(buf.length()>=(ps+2)) // we are looking for a origin packet + x0Dx0A bytes
             if(getPacketData(&buf, sample, emmaPack, ps, &startTemplate, &endTemplate))
             {
                 getLSLframe(sample, measuredData, emmaPack, off, valuableChannels);
-                lslOut.push_sample(measuredData);
-                for (int i=0; i<onChan; i++)
-                    qDebug() << measuredData[i];
-                qDebug() << "-----------------";
+                if(lslOut.have_consumers())
+                    lslOut.push_sample(measuredData);
             }
-             //   pc++;
-        //qDebug() << pc;
-
     }
 
     delete [] sample;
     delete [] measuredData;
     emma.close();
-    stdConsole.writeMessage("*** Session Finished ***");
+    stdConsole.writeMessage("[  INF  ] Session Finished");
     stdConsole.stopThread();
     return a.exec();
 }
