@@ -231,7 +231,7 @@ bool getPacketData(QByteArray* buffer, int32_t* result, packetConfig curCfg, int
 
     if(packStartIndex<0 && packEndIndex<0)
     {
-        buffer->clear();
+        buffer->clear(); // buffer size > expectedSize and neither packet start nor packet end found. Something strange.
         return false;
     }
 
@@ -264,7 +264,10 @@ bool getPacketData(QByteArray* buffer, int32_t* result, packetConfig curCfg, int
         return true;
     }
 
-    buffer->remove(0, qMax(packStartIndex, packEndIndex));
+    if(buffer->length()>expectedSize*5)
+        buffer->clear();  // buffer size > expectedSize*5 and still no packet start or packet end found. Something strange.
+    else
+        buffer->remove(0, qMax(packStartIndex, packEndIndex));
     return false;
 }
 
@@ -356,8 +359,9 @@ int main(int argc, char *argv[])
 
     stdConsole.writeMessage("Initializing...");
     bool err = false;
-    /*foreach(QString command, initScript)
+    foreach(QString command, initScript)
     {
+        stdConsole.writeMessage("    " + command);
         err = true;
         emma.write(command.toUtf8());
         if (!emma.waitForBytesWritten())
@@ -370,9 +374,9 @@ int main(int argc, char *argv[])
         while (emma.waitForReadyRead(10))
             responseData += emma.readAll();
 
-        stdConsole.writeMessage(responseData);
+        stdConsole.writeMessage("    " + responseData);
         err = false;
-    }*/
+    }
 
     if(!err)
         stdConsole.writeMessage("OK");
@@ -391,7 +395,7 @@ int main(int argc, char *argv[])
 
     lsl::stream_info streamInfo(sender.toStdString().c_str(), "EEG", onChan, rate, lsl::cf_float32);
 
-    stdConsole.writeMessage("Loading stream description...");
+    //stdConsole.writeMessage("Loading stream description...");
     /*if(loadStreamInf(streamFile, &streamInfo))
         stdConsole.writeMessage("OK");
     else
@@ -400,7 +404,7 @@ int main(int argc, char *argv[])
     lsl::stream_outlet lslOut(streamInfo);
 
     stdConsole.writeMessage("Starting interchange...");
-    QByteArray buf=bin.readAll();
+    QByteArray buf;//=bin.readAll();
     int32_t* sample = new int32_t[cc];
 
     QByteArrayMatcher startTemplate;
@@ -415,19 +419,23 @@ int main(int argc, char *argv[])
     {
         if(!stdConsole.getLatestCommand().isEmpty())
             break;
-
-        /*buf.append(emma.readAll());
-        if(buf.isEmpty())
-        {
-            QThread::msleep(1);
+        if(!emma.waitForReadyRead())
             continue;
-        }*/
+        buf.append(emma.readAll());
+        //if(buf.isEmpty())
+        //{
+        //    QThread::msleep(1);
+        //    continue;
+        //}
 //int pc = 0;
         while(buf.length()>=ps)
             if(getPacketData(&buf, sample, emmaPack, ps, &startTemplate, &endTemplate))
             {
                 getLSLframe(sample, measuredData, emmaPack, off, valuableChannels);
                 lslOut.push_sample(measuredData);
+                for (int i=0; i<onChan; i++)
+                    qDebug() << measuredData[i];
+                qDebug() << "-----------------";
             }
              //   pc++;
         //qDebug() << pc;
