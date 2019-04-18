@@ -254,17 +254,16 @@ bool getPacketData(QByteArray* buffer, int32_t* result, packetConfig curCfg, int
             if(curCfg[i]==0)
                 continue;
 
-//            uint32_t uchanVal = 0;
-            //int32_t chanVal = 0;
-            uint32_t binChanVal = 0;
+            uint32_t chanVal = 0;
 
-            memcpy(&binChanVal, chunk+offset, curCfg[i]);
-            qToBigEndian(binChanVal, &binChanVal);
-            binChanVal = binChanVal >> (sizeof(uint32_t)-curCfg[i])*8;
+            memcpy(&chanVal, chunk+offset, curCfg[i]);
+            qToBigEndian(chanVal, &chanVal);
+            chanVal >>= (sizeof(uint32_t)-curCfg[i])*8;
 
-            int32_t chanVal = 0;
-            memcpy(&chanVal, &binChanVal, sizeof(int32_t));
-            result[resIndex]=chanVal;
+            if (chanVal & 0x800000)
+                chanVal |= 0xff000000;
+
+            result[resIndex]=static_cast<int32_t>(chanVal);
 
             offset+=curCfg[i];
             resIndex++;
@@ -301,14 +300,9 @@ int main(int argc, char *argv[])
     QCoreApplication::setApplicationName("Emma terminal");
     QCoreApplication::setApplicationVersion("0.1");
 
-    ///
-    QFile bin("C:\\Users\\Alexander Polonevich\\Documents\\su\\packet.bin");
-    if (!bin.open(QFile::ReadOnly))
-        return 1;
-    ///
-
     QCommandLineParser parser;
     parser.setApplicationDescription("COM -> LSL brocker");
+    parser.addHelpOption();
     parser.addVersionOption();
     parser.addPositionalArgument("port", "Path to .ini file with com port esttings");
     parser.addPositionalArgument("packet", "Path to .ini file with packet configuration");
@@ -329,7 +323,7 @@ int main(int argc, char *argv[])
     QString portCfgFile(args[0]);
     QString packetCfgFile(args[1]);
     QString scriptFile(args[2]);
-    QString streamFile("C:\\Users\\Alexander Polonevich\\Documents\\su\\stream.xml");
+    //QString streamFile("C:\\Users\\Alexander Polonevich\\Documents\\su\\stream.xml");
 
 
     QString sender = parser.value(senderOption);
@@ -363,7 +357,7 @@ int main(int argc, char *argv[])
     else
         stdConsole.writeMessage("[WARNING] FAIL");
 
-    /*stdConsole.writeMessage("[  INF  ] Opening port...");
+    stdConsole.writeMessage("[  INF  ] Opening port...");
     if (emma.open(QIODevice::ReadWrite))
         stdConsole.writeMessage("[  INF  ] OK");
     else
@@ -371,11 +365,11 @@ int main(int argc, char *argv[])
         stdConsole.writeMessage("[WARNING] FAIL");
         stdConsole.stopThread();
         return 1;
-    }*/
+    }
 
     stdConsole.writeMessage("[  INF  ] Initializing...");
     bool err = false;
-    /*foreach(QString command, initScript)
+    foreach(QString command, initScript)
     {
         stdConsole.writeMessage("    " + command);
         err = true;
@@ -392,7 +386,7 @@ int main(int argc, char *argv[])
 
         stdConsole.writeMessage("    " + responseData);
         err = false;
-    }*/
+    }
 
     if(!err)
         stdConsole.writeMessage("[  INF  ] OK");
@@ -420,7 +414,7 @@ int main(int argc, char *argv[])
     lsl::stream_outlet lslOut(streamInfo);
 
     stdConsole.writeMessage("[  INF  ] Starting interchange...");
-    QByteArray buf=bin.readAll();
+    QByteArray buf;
     int32_t* sample = new int32_t[cc];
 
     QByteArrayMatcher startTemplate;
@@ -435,17 +429,14 @@ int main(int argc, char *argv[])
     {
         if(!stdConsole.getLatestCommand().isEmpty())
             break;
-        //if(!emma.waitForReadyRead())
-          //  continue;
+        if(!emma.waitForReadyRead())
+            continue;
 
-        //buf.append(emma.readAll());
+        buf.append(emma.readAll());
         while(buf.length()>=(ps+2)) // we are looking for a origin packet + x0Dx0A bytes
             if(getPacketData(&buf, sample, emmaPack, ps, &startTemplate, &endTemplate))
             {
                 getLSLframe(sample, measuredData, emmaPack, off, valuableChannels);
-                qDebug() << sample[0]<< sample[1] << sample[2] << sample[3] << sample[4] << sample[5] << sample[6]
-                        << sample[7] << sample[8] << sample[9] << sample[10] << sample[11] << sample[12] << sample[13]
-                        << sample[14];
                 if(lslOut.have_consumers())
                     lslOut.push_sample(measuredData);
             }
