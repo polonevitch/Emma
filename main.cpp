@@ -322,7 +322,7 @@ int main(int argc, char *argv[])
 {
     QCoreApplication a(argc, argv);
     QCoreApplication::setApplicationName("Emma terminal");
-    QCoreApplication::setApplicationVersion("0.1");
+    QCoreApplication::setApplicationVersion("0.2");
 
     QCommandLineParser parser;
     parser.setApplicationDescription("COM -> LSL brocker");
@@ -339,14 +339,14 @@ int main(int argc, char *argv[])
     parser.addOption(senderOption);
     parser.addOption(rateOption);
 
-    QCommandLineOption verbose("verbose", "diagnostic mode");
+    QCommandLineOption verbose("verbose", "Diagnostic mode");
     parser.addOption(verbose);
 
     parser.process(a);
     const QStringList args = parser.positionalArguments();
     if(args.count()<3)
     {
-        qWarning() << "not enough arguments, run -h for help";
+        qWarning() << "Not enough arguments, run -h for help";
         return 0;
     }
 
