@@ -17,9 +17,15 @@
 #include "LSL/include/lsl_cpp.h"
 #include "pugixml/pugixml.hpp"
 
+static bool diag = false;
+#define DIAG if (diag) qWarning() << "[ DIAGN ]"
+
 bool checkFileExists(QString filePath)
 {
-    return QFileInfo::exists(filePath) && QFileInfo(filePath).isFile();
+    bool ret = QFileInfo::exists(filePath) && QFileInfo(filePath).isFile();
+    if(!ret)
+        DIAG << "File doesn't exists or it's not a file";
+    return ret;
 }
 
 bool loadScript(QString filePath, QStringList* script)
@@ -32,8 +38,10 @@ bool loadScript(QString filePath, QStringList* script)
 
     QFile file(filePath);
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
+    {
+        DIAG << "Can't open file";
         return false;
-
+    }
     QString line;
     QTextStream textStream(&file);
     while (!textStream.atEnd())
@@ -61,12 +69,15 @@ bool loadPortCfg(QString filePath, QSerialPort* port)
 
     QString portName("PortName");
     result = result && comSettings.contains(portName);
+    DIAG << "Port Name" << result;
     port->setPortName(comSettings.value(portName).toString());
+    DIAG << port->portName();
 
     QString baudRate("BaudRate");
     result = result &&
              comSettings.contains(baudRate) &&
              port->setBaudRate(comSettings.value(baudRate).toInt());
+    DIAG << "Baud Rate" << result;
 
     QMap<QString, QSerialPort::DataBits> dataBitsMap = {{"Data5", QSerialPort::Data5},
                                                         {"Data6", QSerialPort::Data6},
@@ -78,6 +89,7 @@ bool loadPortCfg(QString filePath, QSerialPort* port)
              comSettings.contains(dataBits) &&
              dataBitsMap.contains(comSettings.value(dataBits).toString()) &&
              port->setDataBits(dataBitsMap[comSettings.value(dataBits).toString()]);
+    DIAG << "Data Bits" << result;
 
     QMap<QString, QSerialPort::Parity> parityMap = {{"NoParity", QSerialPort::NoParity},
                                                     {"EvenParity", QSerialPort::EvenParity},
@@ -90,6 +102,7 @@ bool loadPortCfg(QString filePath, QSerialPort* port)
              comSettings.contains(parity) &&
              parityMap.contains(comSettings.value(parity).toString()) &&
              port->setParity(parityMap[comSettings.value(parity).toString()]);
+    DIAG << "Parity" << result;
 
     QMap<QString, QSerialPort::StopBits> stopBitsMap = {{"OneStop", QSerialPort::OneStop},
                                                         {"OneAndHalfStop", QSerialPort::OneAndHalfStop},
@@ -100,6 +113,7 @@ bool loadPortCfg(QString filePath, QSerialPort* port)
              comSettings.contains(stopBits) &&
              stopBitsMap.contains(comSettings.value(stopBits).toString()) &&
              port->setStopBits(stopBitsMap[comSettings.value(stopBits).toString()]);
+    DIAG << "Stop Bits" << result;
 
     QMap<QString, QSerialPort::FlowControl> flowControlMap = {{"NoFlowControl", QSerialPort::NoFlowControl},
                                                               {"HardwareControl", QSerialPort::HardwareControl},
@@ -110,6 +124,7 @@ bool loadPortCfg(QString filePath, QSerialPort* port)
              comSettings.contains(flowControl) &&
              flowControlMap.contains(comSettings.value(flowControl).toString()) &&
              port->setFlowControl(flowControlMap[comSettings.value(flowControl).toString()]);
+    DIAG << "Flow Control" << result;
 
     return result;
 }
@@ -117,8 +132,6 @@ bool loadPortCfg(QString filePath, QSerialPort* port)
 typedef unsigned char packetData[65];
 const int channels = 24;
 typedef unsigned char packetConfig[channels];
-//const unsigned char channelsOffset[channels]={1, 2, 5, 8, 11, 14, 17, 20, 23, 26, 29, 32, 35, 38, 41, 44, 47, 50, 53, 56, 59, 61, 63, 65};
-//const unsigned char channelsSize[channels]={1, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 2, 2, 2, 1};
 
 bool loadPacketCfg(QString filePath, packetConfig pCfg)
 {
@@ -156,7 +169,10 @@ bool loadPacketCfg(QString filePath, packetConfig pCfg)
                                                              {"CheckSumm", 1}};
 
     if(packetConfigList.count()!=sizeof(packetConfig))
+    {
+        DIAG << "Unexpected number of packet fields";
         return false;
+    }
 
     QList<QPair<QString, unsigned char>>::iterator it = packetConfigList.begin();
     int pos = 0;
@@ -181,7 +197,10 @@ bool loadStreamInf(QString filePath, lsl::stream_info* i)
 
     QFile f(filePath);
     if (!f.open(QFile::ReadOnly | QFile::Text))
+    {
+        DIAG << "Can't open file";
         return false;
+    }
 
     QTextStream in(&f);
     QString xmlFile = in.readAll();
@@ -233,6 +252,7 @@ bool getPacketData(QByteArray* buffer, int32_t* result, packetConfig curCfg, int
     if(packStartIndex<0 && packEndIndex<0)
     {
         buffer->clear(); // buffer size > expectedSize and neither packet start nor packet end found. Something strange.
+        DIAG << "Buffer size > expectedSize and neither packet start nor packet end found";
         return false;
     }
 
@@ -242,6 +262,7 @@ bool getPacketData(QByteArray* buffer, int32_t* result, packetConfig curCfg, int
         if((packEndIndex-packStartIndex+(stopLen-2))!=expectedSize) // '-2' hardcoded, bc it is x0Dx0A bytes which is gonna turned off soon
         {
             buffer->remove(0, packEndIndex+stopLen);
+            DIAG << "Unexpected packet size";
             return false;
         }
 
@@ -274,7 +295,10 @@ bool getPacketData(QByteArray* buffer, int32_t* result, packetConfig curCfg, int
     }
 
     if(buffer->length()>expectedSize*5)
+    {
         buffer->clear();  // buffer size > expectedSize*5 and still no packet start or packet end found. Something strange.
+        DIAG << "Buffer size > expectedSize*5 and still no packet start or packet end found";
+    }
     else
         buffer->remove(0, qMax(packStartIndex, packEndIndex));
     return false;
@@ -315,19 +339,25 @@ int main(int argc, char *argv[])
     parser.addOption(senderOption);
     parser.addOption(rateOption);
 
+    QCommandLineOption verbose("verbose", "diagnostic mode");
+    parser.addOption(verbose);
+
     parser.process(a);
     const QStringList args = parser.positionalArguments();
     if(args.count()<3)
+    {
+        qWarning() << "not enough arguments, run -h for help";
         return 0;
+    }
 
     QString portCfgFile(args[0]);
     QString packetCfgFile(args[1]);
     QString scriptFile(args[2]);
-    //QString streamFile("C:\\Users\\Alexander Polonevich\\Documents\\su\\stream.xml");
-
 
     QString sender = parser.value(senderOption);
     double rate = parser.value(rateOption).toDouble();
+    diag = parser.isSet(verbose);
+    DIAG << "Diagnostic mode";
 
     console stdConsole;
     stdConsole.start();
@@ -362,6 +392,7 @@ int main(int argc, char *argv[])
         stdConsole.writeMessage("[  INF  ] OK");
     else
     {
+        DIAG << "Can't open port";
         stdConsole.writeMessage("[WARNING] FAIL");
         stdConsole.stopThread();
         return 1;
@@ -375,10 +406,16 @@ int main(int argc, char *argv[])
         err = true;
         emma.write(command.toUtf8());
         if (!emma.waitForBytesWritten())
+        {
+            DIAG << "Can't write to port";
             break;
+        }
 
         if(!emma.waitForReadyRead())
+        {
+            DIAG << "no data to read";
             break;
+        }
 
         QByteArray responseData = emma.readAll();
         while (emma.waitForReadyRead(10))
@@ -400,17 +437,12 @@ int main(int argc, char *argv[])
     int ps = getPacketSize(emmaPack);
     int cc =getPacketChannels(emmaPack);
     const QPair<int, int> valuableChannels = qMakePair(4, 22);
+    DIAG << "Valuable channels hardcoded: 4-22";
     int off = 0;
     int onChan = getOnChannels(emmaPack, valuableChannels, &off);
 
     lsl::stream_info streamInfo(sender.toStdString().c_str(), "EEG", onChan, rate, lsl::cf_float32);
 
-    //stdConsole.writeMessage("Loading stream description...");
-    /*if(loadStreamInf(streamFile, &streamInfo))
-        stdConsole.writeMessage("OK");
-    else
-        stdConsole.writeMessage("FAIL");
-*/
     lsl::stream_outlet lslOut(streamInfo);
 
     stdConsole.writeMessage("[  INF  ] Starting interchange...");
