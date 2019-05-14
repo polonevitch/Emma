@@ -322,7 +322,7 @@ int main(int argc, char *argv[])
 {
     QCoreApplication a(argc, argv);
     QCoreApplication::setApplicationName("Emma terminal");
-    QCoreApplication::setApplicationVersion("0.2");
+    QCoreApplication::setApplicationVersion("0.3");
 
     QCommandLineParser parser;
     parser.setApplicationDescription("COM -> LSL brocker");
@@ -332,9 +332,9 @@ int main(int argc, char *argv[])
     parser.addPositionalArgument("packet", "Path to .ini file with packet configuration");
     parser.addPositionalArgument("script", "Path to .txt file with startup script");
 
-    QCommandLineOption senderOption("sender", "Name of the stream. Describes the device that this stream makes available");
+    QCommandLineOption senderOption("sender", "Name of the stream. Describes the device that this stream makes available", "name");
     senderOption.setDefaultValue("Emma");
-    QCommandLineOption rateOption("rate", "The sampling rate (in Hz) as advertised by the data source");
+    QCommandLineOption rateOption("rate", "The sampling rate (in Hz) as advertised by the data source", "Hz");
     rateOption.setDefaultValue("0");
     parser.addOption(senderOption);
     parser.addOption(rateOption);
@@ -354,14 +354,18 @@ int main(int argc, char *argv[])
     QString packetCfgFile(args[1]);
     QString scriptFile(args[2]);
 
-    QString sender = parser.value(senderOption);
-    double rate = parser.value(rateOption).toDouble();
     diag = parser.isSet(verbose);
     DIAG << "Diagnostic mode";
 
+    double rate = parser.value(rateOption).toDouble();
+    DIAG << "Rate: " << rate;
+
+    QString sender = parser.value(senderOption);
+    DIAG << "Sender: " << sender;
+
     console stdConsole;
     stdConsole.start();
-    stdConsole.writeMessage("[  INF  ] Emma term v0.1");
+    stdConsole.writeMessage("[  INF  ] Emma term " + QCoreApplication::applicationVersion());
 
     QStringList initScript;
     QSerialPort emma;
