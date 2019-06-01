@@ -11,6 +11,8 @@
 #include <QThread>
 #include <QByteArrayMatcher>
 #include <QtEndian>
+#include <QBluetoothSocket>
+#include <QTimer>
 
 #include <console.h>
 
@@ -56,7 +58,49 @@ bool loadScript(QString filePath, QStringList* script)
     return true;
 }
 
-bool loadPortCfg(QString filePath, QSerialPort* port)
+bool connectBT (QString filePath, QBluetoothSocket* socket)
+{
+    if(!socket)
+        return false;
+    if(!checkFileExists(filePath))
+        return false;
+
+    QSettings btSettings(filePath, QSettings::IniFormat);
+
+    bool result = true;
+
+    QString macAddress("MAC");
+    result = result && btSettings.contains(macAddress);
+    DIAG << "BT MAC Address" << result;
+    QBluetoothAddress remoteAddress(btSettings.value(macAddress).toString()); //"00:1D:43:9A:E0:76"
+    DIAG << remoteAddress.toString();
+
+    QString Uuid("UUID");
+    result = result && btSettings.contains(Uuid);
+    DIAG << "Service UUID" << result;
+    QBluetoothUuid remoteUuid(btSettings.value(Uuid).toString()); //"00001101-0000-1000-8000-00805f9b34fb"
+    DIAG << remoteUuid.toString();
+
+    if(result)
+    {
+        DIAG << "An attempt to connect the socket:";
+        QEventLoop loop;
+        QObject::connect(socket, SIGNAL(connected()), &loop, SLOT(quit()));
+        QTimer timer;
+        QObject::connect(&timer, SIGNAL(timeout()), &loop, SLOT(quit()));
+        timer.start(10000);
+        DIAG << "Timeout 10s";
+
+        socket->connectToService(remoteAddress, remoteUuid);
+        loop.exec();
+        result = (socket->state()==QBluetoothSocket::ConnectedState);
+        if(!result)
+            DIAG << socket->errorString();
+    }
+    return result;
+}
+
+bool connectCOM(QString filePath, QSerialPort* port)
 {
     if(!port)
         return false;
@@ -126,6 +170,12 @@ bool loadPortCfg(QString filePath, QSerialPort* port)
              port->setFlowControl(flowControlMap[comSettings.value(flowControl).toString()]);
     DIAG << "Flow Control" << result;
 
+
+    if(result)
+    {
+        DIAG << "An attempt to open the port:";
+        result &= port->open(QIODevice::ReadWrite);
+    }
     return result;
 }
 
@@ -322,13 +372,13 @@ int main(int argc, char *argv[])
 {
     QCoreApplication a(argc, argv);
     QCoreApplication::setApplicationName("Emma terminal");
-    QCoreApplication::setApplicationVersion("0.3");
+    QCoreApplication::setApplicationVersion("0.5");
 
     QCommandLineParser parser;
     parser.setApplicationDescription("COM -> LSL brocker");
     parser.addHelpOption();
     parser.addVersionOption();
-    parser.addPositionalArgument("port", "Path to .ini file with com port esttings");
+    parser.addPositionalArgument("connection", "Path to .ini file with connection settings");
     parser.addPositionalArgument("packet", "Path to .ini file with packet configuration");
     parser.addPositionalArgument("script", "Path to .txt file with startup script");
 
@@ -338,6 +388,9 @@ int main(int argc, char *argv[])
     rateOption.setDefaultValue("0");
     parser.addOption(senderOption);
     parser.addOption(rateOption);
+
+    QCommandLineOption BT("BT", "Connection via Bluetooth. COM port otherwise");
+    parser.addOption(BT);
 
     QCommandLineOption verbose("verbose", "Diagnostic mode");
     parser.addOption(verbose);
@@ -350,12 +403,16 @@ int main(int argc, char *argv[])
         return 0;
     }
 
-    QString portCfgFile(args[0]);
+    QString connCfgFile(args[0]);
     QString packetCfgFile(args[1]);
     QString scriptFile(args[2]);
 
     diag = parser.isSet(verbose);
     DIAG << "Diagnostic mode";
+
+    bool btMode = parser.isSet(BT);
+    DIAG << "Bluetooth connection";
+
 
     double rate = parser.value(rateOption).toDouble();
     DIAG << "Rate: " << rate;
@@ -368,16 +425,14 @@ int main(int argc, char *argv[])
     stdConsole.writeMessage("[  INF  ] Emma term " + QCoreApplication::applicationVersion());
 
     QStringList initScript;
-    QSerialPort emma;
+    QIODevice* emma;
+    if(!btMode)
+        emma = new QSerialPort();
+    else
+        emma = new QBluetoothSocket(QBluetoothServiceInfo::RfcommProtocol);
 
     packetConfig emmaPack;
     memset(emmaPack, 0, sizeof(packetConfig));
-
-    stdConsole.writeMessage("[  INF  ] Loadin port config...");
-    if(loadPortCfg(portCfgFile, &emma))
-        stdConsole.writeMessage("[  INF  ] OK");
-    else
-        stdConsole.writeMessage("[WARNING] FAIL");
 
     stdConsole.writeMessage("[  INF  ] Loadin packet config...");
     if(loadPacketCfg(packetCfgFile, emmaPack))
@@ -391,57 +446,46 @@ int main(int argc, char *argv[])
     else
         stdConsole.writeMessage("[WARNING] FAIL");
 
-    stdConsole.writeMessage("[  INF  ] Opening port...");
-    if (emma.open(QIODevice::ReadWrite))
+    stdConsole.writeMessage("[  INF  ] Connecting...");
+    bool cr = true;
+    if (strcmp(emma->metaObject()->className(), "QSerialPort") == 0)
+        cr = connectCOM(connCfgFile, static_cast<QSerialPort*>(emma));
+    else
+        cr = connectBT(connCfgFile, static_cast<QBluetoothSocket*>(emma));
+    if (cr)
         stdConsole.writeMessage("[  INF  ] OK");
     else
     {
-        DIAG << "Can't open port";
+        DIAG << "Can't connect";
         stdConsole.writeMessage("[WARNING] FAIL");
         stdConsole.stopThread();
         return 1;
     }
 
     stdConsole.writeMessage("[  INF  ] Initializing...");
-    bool err = false;
+    const QString ema("EM+AUTO");
+    if(initScript.first().left(ema.length())==ema)
+    {
+        DIAG << "Auto EM+...";
+        initScript.removeFirst();
+        initScript.prepend(strcmp(emma->metaObject()->className(), "QSerialPort") == 0?"EM+PC":"EM+BT");
+        DIAG << initScript.first();
+    }
+
     foreach(QString command, initScript)
     {
         stdConsole.writeMessage("    " + command);
-        err = true;
-        emma.write(command.toUtf8());
-        if (!emma.waitForBytesWritten())
-        {
-            DIAG << "Can't write to port";
-            break;
-        }
+        emma->write(command.toUtf8());
 
-        if(!emma.waitForReadyRead())
-        {
-            DIAG << "no data to read";
-            break;
-        }
-
-        QByteArray responseData = emma.readAll();
-        while (emma.waitForReadyRead(10))
-            responseData += emma.readAll();
-
-        stdConsole.writeMessage("    " + responseData);
-        err = false;
+        if (strcmp(emma->metaObject()->className(), "QSerialPort") == 0)
+            emma->waitForBytesWritten(3000);
     }
-
-    if(!err)
-        stdConsole.writeMessage("[  INF  ] OK");
-    else
-    {
-        stdConsole.writeMessage("[WARNING] FAIL");
-        stdConsole.stopThread();
-        return 2;
-    }
+    stdConsole.writeMessage("[  INF  ] Complete");
 
     int ps = getPacketSize(emmaPack);
     int cc =getPacketChannels(emmaPack);
     const QPair<int, int> valuableChannels = qMakePair(4, 22);
-    DIAG << "Valuable channels hardcoded: 4-22";
+    DIAG << "Vauable channels hardcoded: 4-22";
     int off = 0;
     int onChan = getOnChannels(emmaPack, valuableChannels, &off);
 
@@ -461,14 +505,10 @@ int main(int argc, char *argv[])
     int32_t* measuredData = new int32_t[onChan];
     memset(measuredData, 0, sizeof(int32_t)*static_cast<size_t>(onChan));
 
-    while(true)
-    {
-        if(!stdConsole.getLatestCommand().isEmpty())
-            break;
-        if(!emma.waitForReadyRead())
-            continue;
+    QEventLoop loop;
 
-        buf.append(emma.readAll());
+    QObject::connect(emma, &QIODevice::readyRead, [&]( ){
+        buf.append(emma->readAll());
         while(buf.length()>=(ps+2)) // we are looking for a origin packet + x0Dx0A bytes
             if(getPacketData(&buf, sample, emmaPack, ps, &startTemplate, &endTemplate))
             {
@@ -476,12 +516,18 @@ int main(int argc, char *argv[])
                 if(lslOut.have_consumers())
                     lslOut.push_sample(measuredData);
             }
-    }
+    });
+    loop.exec();
+
 
     delete [] sample;
     delete [] measuredData;
-    emma.close();
+    //emma->disconnect();
+    //disconnectFromService
+    emma->close();
+    delete emma;
     stdConsole.writeMessage("[  INF  ] Session Finished");
     stdConsole.stopThread();
-    return a.exec();
+    return 0;//a.exec();
+
 }
