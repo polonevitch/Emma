@@ -14,7 +14,7 @@
 #include <QBluetoothSocket>
 #include <QTimer>
 
-#include <console.h>
+//#include <console.h>
 
 #include "LSL/include/lsl_cpp.h"
 #include "pugixml/pugixml.hpp"
@@ -58,7 +58,7 @@ bool loadScript(QString filePath, QStringList* script)
     return true;
 }
 
-bool connectBT (QString filePath, QBluetoothSocket* socket)
+bool connectBT (QString filePath, QBluetoothSocket* socket, int timeout = 10000)
 {
     if(!socket)
         return false;
@@ -88,13 +88,15 @@ bool connectBT (QString filePath, QBluetoothSocket* socket)
         QObject::connect(socket, SIGNAL(connected()), &loop, SLOT(quit()));
         QTimer timer;
         QObject::connect(&timer, SIGNAL(timeout()), &loop, SLOT(quit()));
-        timer.start(10000);
-        DIAG << "Timeout 10s";
+        timer.start(timeout);
+        DIAG << "Timeout " << timeout/1000 << "s";
 
         socket->connectToService(remoteAddress, remoteUuid);
         loop.exec();
+
         result = (socket->state()==QBluetoothSocket::ConnectedState);
-        if(!result)
+
+        if(!result && !socket->errorString().isEmpty())
             DIAG << socket->errorString();
     }
     return result;
@@ -420,9 +422,7 @@ int main(int argc, char *argv[])
     QString sender = parser.value(senderOption);
     DIAG << "Sender: " << sender;
 
-    console stdConsole;
-    stdConsole.start();
-    stdConsole.writeMessage("[  INF  ] Emma term " + QCoreApplication::applicationVersion());
+    qInfo() << "[  INF  ] Emma term " << QCoreApplication::applicationVersion();
 
     QStringList initScript;
     QIODevice* emma;
@@ -434,35 +434,34 @@ int main(int argc, char *argv[])
     packetConfig emmaPack;
     memset(emmaPack, 0, sizeof(packetConfig));
 
-    stdConsole.writeMessage("[  INF  ] Loadin packet config...");
+    qInfo() << ("[  INF  ] Loadin packet config...");
     if(loadPacketCfg(packetCfgFile, emmaPack))
-        stdConsole.writeMessage("[  INF  ] OK");
+        qInfo() << ("[  INF  ] OK");
     else
-        stdConsole.writeMessage("[WARNING] FAIL");
+        qInfo() << ("[WARNING] FAIL");
 
-    stdConsole.writeMessage("[  INF  ] Loadin startup script...");
+    qInfo() << ("[  INF  ] Loadin startup script...");
     if(loadScript(scriptFile, &initScript))
-        stdConsole.writeMessage("[  INF  ] OK");
+        qInfo() << ("[  INF  ] OK");
     else
-        stdConsole.writeMessage("[WARNING] FAIL");
+        qInfo() << ("[WARNING] FAIL");
 
-    stdConsole.writeMessage("[  INF  ] Connecting...");
+    qInfo() << ("[  INF  ] Connecting...");
     bool cr = true;
     if (strcmp(emma->metaObject()->className(), "QSerialPort") == 0)
         cr = connectCOM(connCfgFile, static_cast<QSerialPort*>(emma));
     else
         cr = connectBT(connCfgFile, static_cast<QBluetoothSocket*>(emma));
     if (cr)
-        stdConsole.writeMessage("[  INF  ] OK");
+        qInfo() << ("[  INF  ] OK");
     else
     {
         DIAG << "Can't connect";
-        stdConsole.writeMessage("[WARNING] FAIL");
-        stdConsole.stopThread();
+        qInfo() << ("[WARNING] FAIL");
         return 1;
     }
 
-    stdConsole.writeMessage("[  INF  ] Initializing...");
+    qInfo() << ("[  INF  ] Initializing...");
     const QString ema("EM+AUTO");
     if(initScript.first().left(ema.length())==ema)
     {
@@ -474,13 +473,13 @@ int main(int argc, char *argv[])
 
     foreach(QString command, initScript)
     {
-        stdConsole.writeMessage("    " + command);
+        qInfo() << ("    " + command);
         emma->write(command.toUtf8());
 
         if (strcmp(emma->metaObject()->className(), "QSerialPort") == 0)
             emma->waitForBytesWritten(3000);
     }
-    stdConsole.writeMessage("[  INF  ] Complete");
+    qInfo() << ("[  INF  ] Complete");
 
     int ps = getPacketSize(emmaPack);
     int cc =getPacketChannels(emmaPack);
@@ -493,7 +492,7 @@ int main(int argc, char *argv[])
 
     lsl::stream_outlet lslOut(streamInfo);
 
-    stdConsole.writeMessage("[  INF  ] Starting interchange...");
+    qInfo() << ("[  INF  ] Starting interchange...");
     QByteArray buf;
     int32_t* sample = new int32_t[cc];
 
@@ -505,7 +504,42 @@ int main(int argc, char *argv[])
     int32_t* measuredData = new int32_t[onChan];
     memset(measuredData, 0, sizeof(int32_t)*static_cast<size_t>(onChan));
 
-    QEventLoop loop;
+    QTimer quitQuard;
+    quitQuard.start();
+    QObject::connect(&quitQuard, &QTimer::timeout, [&quitQuard, &a] () {
+        QTextStream inS(stdin);
+        QString ggg = inS.readLine();
+
+         if(inS.readLine()==QChar('q'))
+             a.exit();
+         else
+             quitQuard.start();
+        });
+
+    if (strcmp(emma->metaObject()->className(), "QBluetoothSocket") == 0)
+    {
+        QObject::connect(static_cast<QBluetoothSocket*>(emma),
+            QOverload<QBluetoothSocket::SocketError>::of(&QBluetoothSocket::error),
+            [&](QBluetoothSocket::SocketError error){
+            qInfo() << ("[WARNING] Connection issue");
+            DIAG << error;
+            if(error == QBluetoothSocket::RemoteHostClosedError)
+            {
+                qInfo() << ("[WARNING] Reconnect...");
+                for (int i=0; i<10; i++)
+                {
+                    QString status = QString("[  INF  ] attempt %1 of 10").arg(i);
+                    qInfo() << (status);
+
+                    if(connectBT(connCfgFile, static_cast<QBluetoothSocket*>(emma), 1000))
+                    {
+                        qInfo() << ("[  INF  ] OK");
+                        break;
+                    }
+                }
+            }
+        });
+    }
 
     QObject::connect(emma, &QIODevice::readyRead, [&]( ){
         buf.append(emma->readAll());
@@ -517,17 +551,12 @@ int main(int argc, char *argv[])
                     lslOut.push_sample(measuredData);
             }
     });
-    loop.exec();
-
+    a.exec();
 
     delete [] sample;
     delete [] measuredData;
-    //emma->disconnect();
-    //disconnectFromService
     emma->close();
     delete emma;
-    stdConsole.writeMessage("[  INF  ] Session Finished");
-    stdConsole.stopThread();
-    return 0;//a.exec();
-
+    qInfo() << ("[  INF  ] Session Finished");
+    return 0;
 }
