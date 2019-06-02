@@ -502,16 +502,16 @@ int main(int argc, char *argv[])
     int32_t* measuredData = new int32_t[onChan];
     memset(measuredData, 0, sizeof(int32_t)*static_cast<size_t>(onChan));
 
-    QTimer quitQuard;
-    quitQuard.start();
-    QObject::connect(&quitQuard, &QTimer::timeout, [&quitQuard, &a] () {
+    QTimer quitGuard;
+    quitGuard.start();
+    QObject::connect(&quitGuard, &QTimer::timeout, [&quitGuard, &a] () {
         QTextStream inS(stdin);
         QString ggg = inS.readLine();
 
          if(inS.readLine()==QChar('q'))
              a.exit();
          else
-             quitQuard.start();
+             quitGuard.start();
         });
 
     if (strcmp(emma->metaObject()->className(), "QBluetoothSocket") == 0)
