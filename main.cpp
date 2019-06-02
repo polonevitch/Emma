@@ -14,8 +14,6 @@
 #include <QBluetoothSocket>
 #include <QTimer>
 
-//#include <console.h>
-
 #include "LSL/include/lsl_cpp.h"
 #include "pugixml/pugixml.hpp"
 

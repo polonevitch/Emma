@@ -1,5 +1,12 @@
 #include "console.h"
 
+
+Counter::Counter()
+{ m_value = 0; }
+
+void Counter::setValue(int v)
+{}
+
 console::console()
 {
     stop = false;
@@ -23,6 +30,7 @@ void console::run()
     QTextStream inS(stdin);
     while(!stop)
         lastCommand = inS.readLine();
+    emit keyPressed();
 }
 
 QString console::getLatestCommand()
