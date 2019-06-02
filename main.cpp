@@ -372,10 +372,10 @@ int main(int argc, char *argv[])
 {
     QCoreApplication a(argc, argv);
     QCoreApplication::setApplicationName("Emma terminal");
-    QCoreApplication::setApplicationVersion("0.5");
+    QCoreApplication::setApplicationVersion("0.5.1");
 
     QCommandLineParser parser;
-    parser.setApplicationDescription("COM -> LSL brocker");
+    parser.setApplicationDescription("COM -> LSL brocker\nHint: 'q+Enter' for gentle exit");
     parser.addHelpOption();
     parser.addVersionOption();
     parser.addPositionalArgument("connection", "Path to .ini file with connection settings");
@@ -411,8 +411,7 @@ int main(int argc, char *argv[])
     DIAG << "Diagnostic mode";
 
     bool btMode = parser.isSet(BT);
-    DIAG << "Bluetooth connection";
-
+    DIAG << (btMode?"BT":"COM") << " connection";
 
     double rate = parser.value(rateOption).toDouble();
     DIAG << "Rate: " << rate;
