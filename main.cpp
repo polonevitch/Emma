@@ -402,10 +402,10 @@ int main(int argc, char *argv[])
 {
     QCoreApplication a(argc, argv);
     QCoreApplication::setApplicationName("Emma terminal");
-    QCoreApplication::setApplicationVersion("0.5.1");
+    QCoreApplication::setApplicationVersion("0.6");
 
     QCommandLineParser parser;
-    parser.setApplicationDescription("COM -> LSL brocker\nHint: 'q+Enter' for gentle exit");
+    parser.setApplicationDescription("\nCOM/BT -> LSL brocker\nHint: 'Enter' for gentle exit");
     parser.addHelpOption();
     parser.addVersionOption();
     parser.addPositionalArgument("connection", "Path to .ini file with connection settings");
@@ -515,6 +515,13 @@ int main(int argc, char *argv[])
     int32_t* measuredData = new int32_t[onChan];
     memset(measuredData, 0, sizeof(int32_t)*static_cast<size_t>(onChan));
 
+    bool exitFlag = false;
+
+    auto f = std::async(std::launch::async, [&exitFlag]{
+        std::getchar();
+        exitFlag = true;
+    });
+
     while (true) // will never affect com connection
     {
 
@@ -525,6 +532,9 @@ int main(int argc, char *argv[])
         QObject::connect(emma, &QIODevice::readyRead, [&]( ){
             if (diag)
                 printf(".");
+
+            if(exitFlag)
+                loop->exit();
 
             buf.append(emma->readAll());
             while(buf.length()>=(ps+2)) // we are looking for a origin packet + x0Dx0A bytes
@@ -538,6 +548,9 @@ int main(int argc, char *argv[])
 
         if(emma->isOpen())
             loop->exec();
+
+        if(exitFlag)
+            break;
 
         qInfo() << ("[WARNING] Connection issue");
         qInfo() << ("[  INF  ] Reconnecting...");
