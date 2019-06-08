@@ -28,6 +28,29 @@ bool checkFileExists(QString filePath)
     return ret;
 }
 
+void initialize(QIODevice* dev, QStringList* script)
+{
+    const QString ema("EM+AUTO");
+    if(script->first().left(ema.length())==ema)
+    {
+        DIAG << "Auto EM+...";
+        script->removeFirst();
+        script->prepend(strcmp(dev->metaObject()->className(), "QSerialPort") == 0?"EM+PC":"EM+BT");
+        DIAG << script->first();
+    }
+
+    foreach(QString command, *script)
+    {
+        qInfo() << "    " << command;
+
+        dev->write(command.toUtf8());
+
+        if (strcmp(dev->metaObject()->className(), "QSerialPort") == 0)
+            dev->waitForBytesWritten(3000);
+
+    }
+}
+
 bool loadScript(QString filePath, QStringList* script)
 {
     if(!script)
@@ -349,8 +372,15 @@ bool getPacketData(QByteArray* buffer, int32_t* result, packetConfig curCfg, int
         buffer->clear();  // buffer size > expectedSize*5 and still no packet start or packet end found. Something strange.
         DIAG << "Buffer size > expectedSize*5 and still no packet start or packet end found";
     }
-    else
-        buffer->remove(0, qMax(packStartIndex, packEndIndex));
+
+    int sz = buffer->size();
+    buffer->remove(0, qMax(packStartIndex, packEndIndex)); // data chunk starts in the middle
+
+    if(buffer->size()==sz)
+    {
+        buffer->clear(); // mostly probably, trash in the middle of valuable data
+        DIAG << "Trash in the middle of valuable data";
+    }
     return false;
 }
 
@@ -459,23 +489,7 @@ int main(int argc, char *argv[])
     }
 
     qInfo() << ("[  INF  ] Initializing...");
-    const QString ema("EM+AUTO");
-    if(initScript.first().left(ema.length())==ema)
-    {
-        DIAG << "Auto EM+...";
-        initScript.removeFirst();
-        initScript.prepend(strcmp(emma->metaObject()->className(), "QSerialPort") == 0?"EM+PC":"EM+BT");
-        DIAG << initScript.first();
-    }
-
-    foreach(QString command, initScript)
-    {
-        qInfo() << ("    " + command);
-        emma->write(command.toUtf8());
-
-        if (strcmp(emma->metaObject()->className(), "QSerialPort") == 0)
-            emma->waitForBytesWritten(3000);
-    }
+    initialize(emma, &initScript);
     qInfo() << ("[  INF  ] Complete");
 
     int ps = getPacketSize(emmaPack);
@@ -501,55 +515,44 @@ int main(int argc, char *argv[])
     int32_t* measuredData = new int32_t[onChan];
     memset(measuredData, 0, sizeof(int32_t)*static_cast<size_t>(onChan));
 
-    QTimer quitGuard;
-    quitGuard.start();
-    QObject::connect(&quitGuard, &QTimer::timeout, [&quitGuard, &a] () {
-        QTextStream inS(stdin);
-        QString ggg = inS.readLine();
-
-         if(inS.readLine()==QChar('q'))
-             a.exit();
-         else
-             quitGuard.start();
-        });
-
-    if (strcmp(emma->metaObject()->className(), "QBluetoothSocket") == 0)
+    while (true) // will never affect com connection
     {
-        QObject::connect(static_cast<QBluetoothSocket*>(emma),
-            QOverload<QBluetoothSocket::SocketError>::of(&QBluetoothSocket::error),
-            [&](QBluetoothSocket::SocketError error){
-            qInfo() << ("[WARNING] Connection issue");
-            DIAG << error;
-            if(error == QBluetoothSocket::RemoteHostClosedError)
-            {
-                qInfo() << ("[WARNING] Reconnect...");
-                for (int i=0; i<10; i++)
-                {
-                    QString status = QString("[  INF  ] attempt %1 of 10").arg(i);
-                    qInfo() << (status);
 
-                    if(connectBT(connCfgFile, static_cast<QBluetoothSocket*>(emma), 1000))
-                    {
-                        qInfo() << ("[  INF  ] OK");
-                        break;
-                    }
+        QEventLoop* loop = new QEventLoop();
+        if (strcmp(emma->metaObject()->className(), "QBluetoothSocket") == 0)
+            QObject::connect(static_cast<QBluetoothSocket*>(emma), QOverload<QBluetoothSocket::SocketError>::of(&QBluetoothSocket::error), loop, &QEventLoop::quit);
+
+        QObject::connect(emma, &QIODevice::readyRead, [&]( ){
+            if (diag)
+                printf(".");
+
+            buf.append(emma->readAll());
+            while(buf.length()>=(ps+2)) // we are looking for a origin packet + x0Dx0A bytes
+                if(getPacketData(&buf, sample, emmaPack, ps, &startTemplate, &endTemplate))
+                {
+                    getLSLframe(sample, measuredData, emmaPack, off, valuableChannels);
+                    if(lslOut.have_consumers())
+                        lslOut.push_sample(measuredData);
                 }
-            }
         });
+
+        if(emma->isOpen())
+            loop->exec();
+
+        qInfo() << ("[WARNING] Connection issue");
+        qInfo() << ("[  INF  ] Reconnecting...");
+
+        delete emma;
+        delete loop;
+
+        emma = new QBluetoothSocket(QBluetoothServiceInfo::RfcommProtocol);
+        if(connectBT(connCfgFile, static_cast<QBluetoothSocket*>(emma)))
+            initialize(emma, &initScript);
     }
 
-    QObject::connect(emma, &QIODevice::readyRead, [&]( ){
-        buf.append(emma->readAll());
-        while(buf.length()>=(ps+2)) // we are looking for a origin packet + x0Dx0A bytes
-            if(getPacketData(&buf, sample, emmaPack, ps, &startTemplate, &endTemplate))
-            {
-                getLSLframe(sample, measuredData, emmaPack, off, valuableChannels);
-                if(lslOut.have_consumers())
-                    lslOut.push_sample(measuredData);
-            }
-    });
-    a.exec();
 
+    emma->write("EM+STOP");
+    QThread::msleep(100);
     delete [] sample;
     delete [] measuredData;
     emma->close();
