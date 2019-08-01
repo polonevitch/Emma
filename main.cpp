@@ -303,7 +303,7 @@ int getPacketChannels(packetConfig pCfg)
 int getOnChannels(packetConfig pCfg, QPair<int, int> range, int* indexOffset)
 {
     int res = 0;
-    *indexOffset =0;
+    *indexOffset = 0;
     for (int i=0; i<=range.second; i++)
     {
         if(pCfg[i]>0)
@@ -495,7 +495,7 @@ int main(int argc, char *argv[])
     int ps = getPacketSize(emmaPack);
     int cc =getPacketChannels(emmaPack);
     const QPair<int, int> valuableChannels = qMakePair(4, 22);
-    DIAG << "Vauable channels hardcoded: 4-22";
+    DIAG << "Valuable channels hardcoded from 5 to 23";
     int off = 0;
     int onChan = getOnChannels(emmaPack, valuableChannels, &off);
 
