@@ -197,7 +197,10 @@ bool connectCOM(QString filePath, QSerialPort* port)
     if(result)
     {
         DIAG << "An attempt to open the port:";
-        result &= port->open(QIODevice::ReadWrite);
+        bool po = port->open(QIODevice::ReadWrite);
+        if(!po)
+            DIAG << port->error() << ":" << port->errorString();
+        result &= po;
     }
     return result;
 }
